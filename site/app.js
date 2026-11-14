@@ -127,11 +127,12 @@ function newsHTML(cat) {
     ...srcs.map((s) => sideBtn(cat, 'src:' + s.name, s.name, s.avatar || '', f === 'src:' + s.name, s.count)),
     '<hr>',
     `<button class="side-btn tool" data-addsrc="${esc(cat.id)}"><span class="av plus">+</span><span class="nm">Aggiungi</span></button>`,
+    `<button class="side-btn tool ${state.editing === cat.id ? 'on' : ''}" data-edmode="${esc(cat.id)}"><span class="av minus">${state.editing === cat.id ? '✓' : '✎'}</span><span class="nm">${state.editing === cat.id ? 'Fatto' : 'Rinomina'}</span></button>`,
     `<button class="side-btn tool ${state.removing === cat.id ? 'on' : ''}" data-rmmode="${esc(cat.id)}"><span class="av minus">${state.removing === cat.id ? '✓' : '−'}</span><span class="nm">${state.removing === cat.id ? 'Fatto' : 'Togli'}</span></button>`,
   ].join('');
   const title = f === 'all' ? (cat.football ? 'Notizie e video' : cat.name) : f === 'video' ? 'Video' : f === 'article' ? 'Notizie' : f.slice(4);
   return `<h2 id="feed-top">${esc(title)}</h2>
-    <div class="split"><aside class="side ${state.removing === cat.id ? 'removing' : ''}">${side}</aside>
+    <div class="split"><aside class="side ${state.removing === cat.id ? 'removing' : ''} ${state.editing === cat.id ? 'editing' : ''}">${side}</aside>
     <div class="feed"><div class="list">${items.slice(0, n).map(itemHTML).join('') || '<div class="empty">Ancora nessun contenuto da questa fonte</div>'}</div>
     ${items.length > n ? `<button class="more" data-more="${esc(cat.id + f)}">Mostra altri</button>` : ''}</div></div>`;
 }
@@ -206,10 +207,11 @@ function renderSources(v) {
     ${!token ? `<div class="card notice warn" style="margin-bottom:12px">Per aggiungere o togliere fonti dal telefono collega GitHub una volta sola: <b>Impostazioni → Collega GitHub</b> qui sotto.</div>` : ''}
     ${s ? s.categories.map((c, ci) => `
       <div class="card src-cat"><header><span>${esc(c.icon || '⭐')}</span><span class="grow">${esc(c.name)}</span>
+        <button class="x" title="Rinomina categoria" data-rencat="${ci}">✎</button>
         <button class="btn sm" data-add="${ci}">+ Fonte</button>
         ${c.football ? '' : `<button class="x" title="Elimina categoria" data-delcat="${ci}">🗑</button>`}</header>
         ${(c.sources || []).map((x, si) => `<div class="src"><div class="grow">${esc(x.name)}<small>${esc(TYPE_LABEL[x.type] || x.type)} · ${esc(srcDetail(x))}</small></div>
-          <button class="x" title="Rimuovi" data-del="${ci}:${si}">✕</button></div>`).join('')}
+          <button class="x" title="Rinomina" data-ren="${ci}:${si}">✎</button><button class="x" title="Rimuovi" data-del="${ci}:${si}">✕</button></div>`).join('')}
       </div>`).join('') : '<div class="empty">Elenco fonti non disponibile</div>'}
     <div class="row"><button class="btn ghost" data-newcat="1">+ Nuova categoria (es. Tecnologia, Viaggi…)</button></div>
 
@@ -250,6 +252,37 @@ function addSourceForm(ci) {
     else if (type === 'news') src.query = val;
     else src.url = /^https?:/.test(val) ? val : 'https://' + val;
     await saveSources((cfg) => { cfg.categories[ci].sources.push(src); }, `Aggiunta fonte "${src.name}"`);
+  };
+}
+
+// Rinomina un canale (si >= 0) o una categoria (si = -1)
+function renameForm(ci, si) {
+  const c = state.sources.categories[ci];
+  const isCat = si < 0;
+  const old = isCat ? c.name : c.sources[si].name;
+  openSheet(`<h3>${isCat ? 'Rinomina categoria' : 'Rinomina canale'}</h3>
+    <label>Nome</label><input id="r-name" value="${esc(old)}">
+    ${isCat ? `<label>Icona (emoji)</label><input id="r-icon" value="${esc(c.icon || '')}" maxlength="4">` : ''}
+    <div class="row" style="margin-top:16px"><button class="btn" id="r-ok">Salva</button><button class="btn ghost" data-close="1">Annulla</button></div>`);
+  const inp = $('#r-name'); inp.focus(); inp.select();
+  $('#r-ok').onclick = async () => {
+    const name = inp.value.trim();
+    const icon = isCat ? $('#r-icon').value.trim() : '';
+    if (!name) return toast('Scrivi un nome');
+    if (!isCat && c.sources.some((x, i) => i !== si && x.name === name)) return toast('Esiste già una fonte con questo nome');
+    await saveSources((cfg) => {
+      const cc = cfg.categories.find((x) => x.id === c.id);
+      if (isCat) { cc.name = name; if (icon) cc.icon = icon; return; }
+      const s = cc.sources.find((x) => x.name === old);
+      if (s) s.name = name;
+      // aggiorna subito anche i contenuti già scaricati
+      const d = state.data?.categories.find((x) => x.id === c.id);
+      if (d) {
+        d.items.forEach((i) => { if (i.via === old) { i.via = name; if (i.source === old) i.source = name; } });
+        (d.sources || []).forEach((x) => { if (x.name === old) x.name = name; });
+      }
+      if (state.filter[c.id] === 'src:' + old) state.filter[c.id] = 'src:' + name;
+    }, isCat ? `Rinominata categoria "${old}" in "${name}"` : `Rinominato "${old}" in "${name}"`);
   };
 }
 
@@ -355,6 +388,7 @@ function syncData(cfg) {
   for (const c of cfg.categories) {
     let d = state.data.categories.find((x) => x.id === c.id);
     if (!d) { d = { id: c.id, name: c.name, icon: c.icon, items: [], sources: [] }; state.data.categories.push(d); }
+    d.name = c.name; d.icon = c.icon || d.icon;
     const names = new Set(c.sources.map((x) => x.name));
     d.items = d.items.filter((i) => names.has(i.via));
     d.sources = c.sources.map((x) => (d.sources || []).find((y) => y.name === x.name) || { name: x.name, type: x.type, avatar: '', count: 0 });
@@ -376,7 +410,16 @@ document.addEventListener('click', async (e) => {
     if (ci < 0) return toast('Categoria non trovata');
     return addSourceForm(ci);
   }
-  if (ds.rmmode) { state.removing = state.removing === ds.rmmode ? null : ds.rmmode; keepSide(render); return; }
+  if (ds.rmmode) { state.removing = state.removing === ds.rmmode ? null : ds.rmmode; state.editing = null; keepSide(render); return; }
+  if (ds.edmode) { state.editing = state.editing === ds.edmode ? null : ds.edmode; state.removing = null; keepSide(render); return; }
+  if (ds.filter && state.editing === ds.cat && ds.filter.startsWith('src:')) {
+    const ci = catIndex(ds.cat);
+    const si = ci < 0 ? -1 : state.sources.categories[ci].sources.findIndex((x) => x.name === ds.filter.slice(4));
+    if (si < 0) return toast('Fonte non trovata');
+    return renameForm(ci, si);
+  }
+  if (ds.ren) { const [ci, si] = ds.ren.split(':').map(Number); return renameForm(ci, si); }
+  if (ds.rencat) return renameForm(+ds.rencat, -1);
   if (ds.filter && state.removing === ds.cat && ds.filter.startsWith('src:')) {
     const name = ds.filter.slice(4), ci = catIndex(ds.cat);
     const si = ci < 0 ? -1 : state.sources.categories[ci].sources.findIndex((x) => x.name === name);
