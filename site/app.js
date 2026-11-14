@@ -419,7 +419,15 @@ document.addEventListener('click', async (e) => {
 $('#refresh').onclick = () => load(true);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - state.lastLoad > 5 * 60e3) load(); });
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator) {
+  // Quando arriva una nuova versione dell'app, ricarica la pagina da sola
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
+  }).catch(() => {});
+}
 state.data = store.get('cache');
 if (state.data) render();
 load();
