@@ -88,7 +88,7 @@ function render() {
   if (state.tab === '_src') return renderSources(v);
   if (!d) { v.innerHTML = '<div class="empty">Nessun dato ancora. Il primo aggiornamento automatico arriva entro pochi minuti dall\'attivazione.</div>'; return; }
   const cat = cats.find((c) => c.id === state.tab);
-  v.innerHTML = (cat.football ? footballHTML(cat.football) : '') + channelsHTML(cat) + newsHTML(cat);
+  v.innerHTML = (cat.football ? footballHTML(cat.football) : '') + newsHTML(cat);
 }
 const shortName = (n) => (n.length > 12 ? n.split(' ')[0] : n);
 
@@ -99,32 +99,41 @@ function itemHTML(i) {
     <div class="meta">${i.kind === 'video' ? '<span class="badge">Video</span>' : ''}<span>${esc(i.source)}</span><span>·</span><span>${esc(ago(i.date))}</span></div></div></a>`;
 }
 
-// Ultimo video di ciascun canale preferito
-function channelsHTML(cat) {
-  const seen = new Set();
-  const latest = cat.items.filter((i) => i.kind === 'video' && !seen.has(i.via) && seen.add(i.via));
-  if (!latest.length) return '';
-  return `<h2>Dai tuoi canali</h2><div class="hscroll">${latest
-    .map((i) => `<a class="card" href="${esc(i.link)}" target="_blank" rel="noopener">
-      <div class="hl" style="margin:0"><img loading="lazy" src="${esc(i.image)}" alt=""><div class="play"><span>▶</span></div>
-      <div class="cap">${esc(i.title)}</div></div>
-      <div class="notice" style="padding:8px 10px"><b>${esc(i.via)}</b> · ${esc(ago(i.date))}</div></a>`)
-    .join('')}</div>`;
+// Notizie e video con la colonna delle fonti a sinistra (tocca una fonte per filtrare)
+const initials = (n) => n.replace(/[^\p{L}\p{N} ]/gu, ' ').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+function sideBtn(cat, key, label, avatar, active, count) {
+  const pic = avatar
+    ? `<img src="${esc(avatar)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'av',textContent:'${esc(initials(label))}'}))">`
+    : `<span class="av">${esc(avatar === null ? label.slice(0, 2) : initials(label))}</span>`;
+  return `<button class="side-btn ${active ? 'active' : ''}" data-filter="${esc(key)}" data-cat="${esc(cat.id)}">${pic}<span class="nm">${esc(label)}</span>${count != null ? `<span class="ct">${count}</span>` : ''}</button>`;
 }
 
 function newsHTML(cat) {
   const f = state.filter[cat.id] || 'all';
-  const sources = [...new Set(cat.items.map((i) => i.via))];
+  const srcs = cat.sources?.length ? cat.sources : [...new Set(cat.items.map((i) => i.via))].map((name) => ({ name }));
   const hasVideo = cat.items.some((i) => i.kind === 'video');
-  const chips = [['all', 'Tutto'], ...(hasVideo ? [['video', '▶ Video'], ['article', 'Notizie']] : []), ...sources.map((s) => ['src:' + s, s])];
+  const hasArt = cat.items.some((i) => i.kind !== 'video');
   let items = cat.items;
   if (f === 'video' || f === 'article') items = items.filter((i) => i.kind === f);
   else if (f.startsWith('src:')) items = items.filter((i) => i.via === f.slice(4));
   const n = state.shown[cat.id + f] || 20;
-  return `<h2>${cat.football ? 'Notizie e video' : esc(cat.name)}</h2>
-    <div class="chips">${chips.map(([k, l]) => `<button class="chip ${k === f ? 'active' : ''}" data-filter="${esc(k)}" data-cat="${esc(cat.id)}">${esc(l)}</button>`).join('')}</div>
-    <div class="list">${items.slice(0, n).map(itemHTML).join('') || '<div class="empty">Niente da mostrare</div>'}</div>
-    ${items.length > n ? `<button class="more" data-more="${esc(cat.id + f)}">Mostra altri</button>` : ''}`;
+  const side = [
+    sideBtn(cat, 'all', 'Tutto', '', f === 'all').replace('<span class="av">T</span>', '<span class="av">★</span>'),
+    ...(hasVideo && hasArt ? [
+      sideBtn(cat, 'video', 'Video', '', f === 'video').replace('<span class="av">V</span>', '<span class="av">▶</span>'),
+      sideBtn(cat, 'article', 'Notizie', '', f === 'article').replace('<span class="av">N</span>', '<span class="av">📰</span>'),
+    ] : []),
+    '<hr>',
+    ...srcs.map((s) => sideBtn(cat, 'src:' + s.name, s.name, s.avatar || '', f === 'src:' + s.name, s.count)),
+    '<hr>',
+    `<button class="side-btn tool" data-addsrc="${esc(cat.id)}"><span class="av plus">+</span><span class="nm">Aggiungi</span></button>`,
+    `<button class="side-btn tool ${state.removing === cat.id ? 'on' : ''}" data-rmmode="${esc(cat.id)}"><span class="av minus">${state.removing === cat.id ? '✓' : '−'}</span><span class="nm">${state.removing === cat.id ? 'Fatto' : 'Togli'}</span></button>`,
+  ].join('');
+  const title = f === 'all' ? (cat.football ? 'Notizie e video' : cat.name) : f === 'video' ? 'Video' : f === 'article' ? 'Notizie' : f.slice(4);
+  return `<h2 id="feed-top">${esc(title)}</h2>
+    <div class="split"><aside class="side ${state.removing === cat.id ? 'removing' : ''}">${side}</aside>
+    <div class="feed"><div class="list">${items.slice(0, n).map(itemHTML).join('') || '<div class="empty">Ancora nessun contenuto da questa fonte</div>'}</div>
+    ${items.length > n ? `<button class="more" data-more="${esc(cat.id + f)}">Mostra altri</button>` : ''}</div></div>`;
 }
 
 function outcome(m, team) {
@@ -320,8 +329,9 @@ async function saveSources(mutate, message) {
       body: JSON.stringify({ message: message + ' (da MyTaste)', content: b64(JSON.stringify(cfg, null, 2) + '\n'), sha: file.sha, branch: br }),
     });
     state.sources = cfg;
+    syncData(cfg);
     closeSheet();
-    render();
+    keepSide(render);
     toast('Salvato ✅ I nuovi contenuti arrivano tra 2-3 minuti', 5000);
   } catch (e) {
     toast('Errore: ' + e.message, 6000);
@@ -336,6 +346,23 @@ async function dispatch() {
   } catch (e) { toast('Errore: ' + e.message, 6000); }
 }
 
+function catIndex(id) { return state.sources ? state.sources.categories.findIndex((c) => c.id === id) : -1; }
+function keepSide(fn) { const y = $('.side')?.scrollTop || 0; fn(); if ($('.side')) $('.side').scrollTop = y; }
+
+// Mostra subito le modifiche alle fonti, senza aspettare il prossimo aggiornamento
+function syncData(cfg) {
+  if (!state.data) return;
+  for (const c of cfg.categories) {
+    let d = state.data.categories.find((x) => x.id === c.id);
+    if (!d) { d = { id: c.id, name: c.name, icon: c.icon, items: [], sources: [] }; state.data.categories.push(d); }
+    const names = new Set(c.sources.map((x) => x.name));
+    d.items = d.items.filter((i) => names.has(i.via));
+    d.sources = c.sources.map((x) => (d.sources || []).find((y) => y.name === x.name) || { name: x.name, type: x.type, avatar: '', count: 0 });
+  }
+  state.data.categories = state.data.categories.filter((d) => cfg.categories.some((c) => c.id === d.id));
+  store.set('cache', state.data);
+}
+
 // ---------- eventi ----------
 document.addEventListener('click', async (e) => {
   const t = e.target.closest('button, .sheet');
@@ -344,7 +371,33 @@ document.addEventListener('click', async (e) => {
   if (t.id === 'sheet' && e.target === t) return closeSheet();
   if (ds.close) return closeSheet();
   if (ds.tab) { state.tab = ds.tab; store.set('tab', ds.tab); render(); window.scrollTo(0, 0); return; }
-  if (ds.filter) { state.filter[ds.cat] = ds.filter; render(); return; }
+  if (ds.addsrc) {
+    const ci = catIndex(ds.addsrc);
+    if (ci < 0) return toast('Categoria non trovata');
+    return addSourceForm(ci);
+  }
+  if (ds.rmmode) { state.removing = state.removing === ds.rmmode ? null : ds.rmmode; keepSide(render); return; }
+  if (ds.filter && state.removing === ds.cat && ds.filter.startsWith('src:')) {
+    const name = ds.filter.slice(4), ci = catIndex(ds.cat);
+    const si = ci < 0 ? -1 : state.sources.categories[ci].sources.findIndex((x) => x.name === name);
+    if (si < 0) return toast('Fonte non trovata');
+    if (confirm(`Togliere "${name}" da questa sezione?`)) {
+      await saveSources((cfg) => {
+        const c = cfg.categories.find((x) => x.id === ds.cat);
+        c.sources = c.sources.filter((x) => x.name !== name);
+      }, `Rimossa fonte "${name}"`);
+    }
+    return;
+  }
+  if (ds.filter) {
+    state.filter[ds.cat] = ds.filter;
+    const sideScroll = $('.side')?.scrollTop || 0;
+    render();
+    if ($('.side')) $('.side').scrollTop = sideScroll;
+    const top = $('#feed-top');
+    if (top && top.getBoundingClientRect().top < 0) window.scrollTo({ top: window.scrollY + top.getBoundingClientRect().top - 64 });
+    return;
+  }
   if (ds.more) { state.shown[ds.more] = (state.shown[ds.more] || 20) + 20; render(); return; }
   if (ds.std) { state.shown._std = !state.shown._std; render(); return; }
   if (ds.add) return addSourceForm(+ds.add);

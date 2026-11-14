@@ -85,6 +85,21 @@ async function youtubeChannelId(src) {
   return (ytCache[h] = id);
 }
 
+async function youtubeAvatar(id) {
+  try {
+    const html = await get(`https://www.youtube.com/channel/${id}`, { headers: { Cookie: 'SOCS=CAI; CONSENT=YES+1', 'User-Agent': 'Mozilla/5.0' } });
+    const m = html.match(/<meta property="og:image" content="([^"]+)"/);
+    return m ? m[1].replace(/=s\d+-/, '=s96-') : '';
+  } catch { return ''; }
+}
+
+function sourceIcon(src) {
+  try {
+    const u = src.type === 'rss' ? src.url : '';
+    return u ? `https://www.google.com/s2/favicons?domain=${new URL(u).hostname}&sz=64` : '';
+  } catch { return ''; }
+}
+
 async function loadSource(src) {
   let url, kind = 'article';
   if (src.type === 'youtube') {
@@ -248,7 +263,15 @@ for (const cat of config.categories) {
     .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
     .filter((i) => { const k = i.title.toLowerCase().slice(0, 70); if (seen.has(k)) return false; seen.add(k); return true; })
     .slice(0, MAX_PER_CATEGORY);
-  const entry = { id: cat.id, name: cat.name, icon: cat.icon || '⭐', items: dedup };
+  const sources = await Promise.all(
+    (cat.sources || []).map(async (src) => ({
+      name: src.name,
+      type: src.type,
+      avatar: src.type === 'youtube' ? await youtubeChannelId(src).then(youtubeAvatar).catch(() => '') : sourceIcon(src),
+      count: dedup.filter((i) => i.via === src.name).length,
+    }))
+  );
+  const entry = { id: cat.id, name: cat.name, icon: cat.icon || '⭐', sources, items: dedup };
   if (cat.football) {
     try { entry.football = await loadFootball(cat.football); } catch (e) { result.errors.push(`${cat.name} › calcio: ${e.message}`); }
   }
