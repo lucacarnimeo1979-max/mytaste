@@ -22,6 +22,41 @@ const WORKFLOW = 'update.yml';
 
 const state = { data: null, sources: null, tab: store.get('tab', null), filter: {}, shown: {}, lastLoad: 0 };
 
+// Ultima visita: tutto ciò che è uscito dopo è "nuovo"
+const prevVisit = store.get('visit', Date.now() - 864e5);
+const markVisit = () => store.set('visit', Date.now());
+const isNew = (i) => i.date && Date.parse(i.date) > prevVisit;
+
+// Colore e motivo di ogni sezione. Le nuove categorie prendono un colore dalla tavolozza.
+const THEMES = {
+  milan: { c: '#d7141a', on: '#ffffff', ink: '#b3101a', p: 'stripes' },
+  ai: { c: '#0b8a7a', on: '#ffffff', ink: '#08705f', p: 'dots' },
+  divertimento: { c: '#ffbf1f', on: '#231a00', ink: '#8a6200', p: 'wave' },
+};
+const PALETTE = [
+  { c: '#2f5bea', on: '#ffffff', ink: '#2449c4' }, { c: '#e2541f', on: '#ffffff', ink: '#b8410f' },
+  { c: '#7a3cc9', on: '#ffffff', ink: '#6630ad' }, { c: '#1f8f4d', on: '#ffffff', ink: '#17733d' },
+  { c: '#d6337a', on: '#ffffff', ink: '#b02462' }, { c: '#0a7fb0', on: '#ffffff', ink: '#08688f' },
+];
+function themeOf(id) {
+  if (THEMES[id]) return THEMES[id];
+  const h = [...String(id)].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) >>> 0, 7);
+  return { ...PALETTE[h % PALETTE.length], p: ['dots', 'wave'][h % 2] };
+}
+function applyTheme(id) {
+  const t = id === '_src' ? { c: '#3a3f4a', on: '#ffffff', ink: '#3a3f4a' } : themeOf(id);
+  const r = document.documentElement.style;
+  r.setProperty('--cat', t.c); r.setProperty('--on-cat', t.on); r.setProperty('--cat-ink', t.ink);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t.c);
+}
+function greeting() {
+  const h = new Date().getHours();
+  const name = store.get('name', '');
+  const g = h < 5 ? 'Buonanotte' : h < 13 ? 'Buongiorno' : h < 18 ? 'Buon pomeriggio' : 'Buonasera';
+  $('#greet').textContent = name ? `${g}, ${name}` : g;
+  $('#today').textContent = new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
 // ---------- utilità date ----------
 const rtf = new Intl.RelativeTimeFormat('it', { numeric: 'auto' });
 function ago(iso) {
@@ -77,35 +112,79 @@ async function load(force = false) {
 // ---------- render ----------
 function render() {
   const d = state.data;
-  $('#updated').textContent = d ? 'Aggiornato ' + ago(d.updated) : '';
+  greeting();
+  $('#updated').innerHTML = d ? `Aggiornato<br>${esc(ago(d.updated))}` : '';
   const cats = d?.categories || [];
   const tabs = [...cats.map((c) => ({ id: c.id, name: c.name, icon: c.icon })), { id: '_src', name: 'Fonti', icon: '⚙️' }];
   if (!tabs.some((t) => t.id === state.tab)) state.tab = tabs[0].id;
+  applyTheme(state.tab);
   $('#tabs').innerHTML = tabs
-    .map((t) => `<button class="tab ${t.id === state.tab ? 'active' : ''}" data-tab="${esc(t.id)}"><span class="ic">${esc(t.icon)}</span>${esc(shortName(t.name))}</button>`)
+    .map((t) => {
+      const th = t.id === '_src' ? { c: '#3a3f4a', on: '#fff' } : themeOf(t.id);
+      return `<button class="tab ${t.id === state.tab ? 'active' : ''}" data-tab="${esc(t.id)}" style="--tab-c:${th.c};--tab-on:${th.on}" aria-label="${esc(t.name)}"><span class="ic">${esc(t.icon)}</span><span class="lb">${esc(shortName(t.name))}</span></button>`;
+    })
     .join('');
   const v = $('#view');
   if (state.tab === '_src') return renderSources(v);
   if (!d) { v.innerHTML = '<div class="empty">Nessun dato ancora. Il primo aggiornamento automatico arriva entro pochi minuti dall\'attivazione.</div>'; return; }
   const cat = cats.find((c) => c.id === state.tab);
-  v.innerHTML = (cat.football ? footballHTML(cat.football) : '') + newsHTML(cat);
+  v.innerHTML = heroHTML(cat) + (cat.football ? footballHTML(cat.football) : '') + newsHTML(cat);
 }
-const shortName = (n) => (n.length > 12 ? n.split(' ')[0] : n);
+const shortName = (n) => (n.length > 13 ? n.split(' ')[0] : n);
 
+// Testata colorata della sezione
+function heroHTML(cat) {
+  const t = themeOf(cat.id);
+  const fresh = cat.items.filter(isNew).length;
+  const last = cat.items[0]?.date;
+  const srcs = (cat.sources || []).filter((s) => s.avatar);
+  const stack = srcs.length ? `<span class="stack">${srcs.slice(0, 5).map((s) => `<img src="${esc(s.avatar)}" alt="" loading="lazy" onerror="this.remove()">`).join('')}</span>` : '';
+  const sub = `<div class="sub">${stack}<span>${fresh ? `<b>${fresh} nuovi</b> dall'ultima visita` : 'Sei in pari'}</span>${last ? `<span>ultimo ${esc(ago(last))}</span>` : ''}</div>`;
+  const f = cat.football;
+  const next = f?.fixtures?.[0];
+  if (next) {
+    const d = Math.max(0, Date.parse(next.date) - Date.now());
+    const live = next.status === 'in';
+    const clock = live ? '' : `<div class="clock"><div><b>${Math.floor(d / 864e5)}</b><small>giorni</small></div><div><b>${Math.floor((d % 864e5) / 36e5)}</b><small>ore</small></div><div><b>${Math.floor((d % 36e5) / 6e4)}</b><small>min</small></div></div>`;
+    const form = f.results.slice(0, 5).reverse().map((r) => outcome(r)).join('');
+    return `<section class="hero p-${t.p || 'dots'}">
+      <div class="eyebrow">${esc(cat.icon)} ${esc(cat.name)} · ${live ? '<b>in diretta</b>' : 'prossima partita'} · ${esc(next.competition)}</div>
+      <div class="fixture">
+        <div class="tm"><img src="${esc(next.home.logo)}" alt="">${esc(next.home.name)}</div>
+        <div class="mid ${live ? 'live' : ''}">${live ? `${esc(next.home.score)}–${esc(next.away.score)}` : 'VS'}</div>
+        <div class="tm"><img src="${esc(next.away.logo)}" alt="">${esc(next.away.name)}</div>
+      </div>
+      ${clock}
+      <div class="when-line">${esc(fmtMatch(next.date))}${next.venue ? ' · ' + esc(next.venue) : ''}</div>
+      ${form ? `<div class="form" title="Ultime 5 partite">${form}</div>` : ''}
+    </section>`;
+  }
+  return `<section class="hero p-${t.p || 'dots'}">
+    <div class="eyebrow">${esc(cat.icon)} ${(cat.sources || []).length} ${(cat.sources || []).length === 1 ? 'fonte' : 'fonti'}</div>
+    <h1>${esc(cat.name)}</h1>${sub}</section>`;
+}
+
+function metaHTML(i) {
+  return `${isNew(i) ? '<span class="new">Nuovo</span>' : ''}${i.kind === 'video' ? '<span class="badge">Video</span>' : ''}<span class="who">${esc(i.source)}</span><span>· ${esc(ago(i.date))}</span>`;
+}
 function itemHTML(i) {
-  const img = i.image ? `<img class="thumb" loading="lazy" src="${esc(i.image)}" alt="" onerror="this.remove()">` : '';
+  const img = i.image ? `<span class="pic"><img class="thumb" loading="lazy" src="${esc(i.image)}" alt="" onerror="this.parentNode.remove()">${i.kind === 'video' ? '<span class="dur">▶</span>' : ''}</span>` : '';
   return `<a class="card item ${i.kind}" href="${esc(i.link)}" target="_blank" rel="noopener">${img}
-    <div class="body"><div class="title">${esc(i.title)}</div>
-    <div class="meta">${i.kind === 'video' ? '<span class="badge">Video</span>' : ''}<span>${esc(i.source)}</span><span>·</span><span>${esc(ago(i.date))}</span></div></div></a>`;
+    <div class="body"><div class="title">${esc(i.title)}</div><div class="meta">${metaHTML(i)}</div></div></a>`;
+}
+function featureHTML(i) {
+  return `<a class="feature ${i.image ? '' : 'noimg'}" href="${esc(i.link)}" target="_blank" rel="noopener">
+    ${i.image ? `<img src="${esc(i.image)}" alt="" onerror="this.parentNode.classList.add('noimg');this.remove()">` : ''}
+    <div class="ov"><div class="meta">${metaHTML(i)}</div><div class="title">${esc(i.title)}</div></div></a>`;
 }
 
 // Notizie e video con la colonna delle fonti a sinistra (tocca una fonte per filtrare)
 const initials = (n) => n.replace(/[^\p{L}\p{N} ]/gu, ' ').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
-function sideBtn(cat, key, label, avatar, active, count) {
+function sideBtn(cat, key, label, avatar, active, count, hot) {
   const pic = avatar
     ? `<img src="${esc(avatar)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'av',textContent:'${esc(initials(label))}'}))">`
     : `<span class="av">${esc(avatar === null ? label.slice(0, 2) : initials(label))}</span>`;
-  return `<button class="side-btn ${active ? 'active' : ''}" data-filter="${esc(key)}" data-cat="${esc(cat.id)}">${pic}<span class="nm">${esc(label)}</span>${count != null ? `<span class="ct">${count}</span>` : ''}</button>`;
+  return `<button class="side-btn ${active ? 'active' : ''}" data-filter="${esc(key)}" data-cat="${esc(cat.id)}">${pic}<span class="nm">${esc(label)}</span>${count != null ? `<span class="ct ${hot ? 'hot' : ''}">${count}</span>` : ''}</button>`;
 }
 
 function newsHTML(cat) {
@@ -124,16 +203,17 @@ function newsHTML(cat) {
       sideBtn(cat, 'article', 'Notizie', '', f === 'article').replace('<span class="av">N</span>', '<span class="av">📰</span>'),
     ] : []),
     '<hr>',
-    ...srcs.map((s) => sideBtn(cat, 'src:' + s.name, s.name, s.avatar || '', f === 'src:' + s.name, s.count)),
+    ...srcs.map((s) => sideBtn(cat, 'src:' + s.name, s.name, s.avatar || '', f === 'src:' + s.name, s.count, cat.items.some((i) => i.via === s.name && isNew(i)))),
     '<hr>',
     `<button class="side-btn tool" data-addsrc="${esc(cat.id)}"><span class="av plus">+</span><span class="nm">Aggiungi</span></button>`,
     `<button class="side-btn tool ${state.editing === cat.id ? 'on' : ''}" data-edmode="${esc(cat.id)}"><span class="av minus">${state.editing === cat.id ? '✓' : '✎'}</span><span class="nm">${state.editing === cat.id ? 'Fatto' : 'Rinomina'}</span></button>`,
     `<button class="side-btn tool ${state.removing === cat.id ? 'on' : ''}" data-rmmode="${esc(cat.id)}"><span class="av minus">${state.removing === cat.id ? '✓' : '−'}</span><span class="nm">${state.removing === cat.id ? 'Fatto' : 'Togli'}</span></button>`,
   ].join('');
-  const title = f === 'all' ? (cat.football ? 'Notizie e video' : cat.name) : f === 'video' ? 'Video' : f === 'article' ? 'Notizie' : f.slice(4);
-  return `<h2 id="feed-top">${esc(title)}</h2>
+  const title = f === 'all' ? (cat.football ? 'Notizie e video' : 'Ultimi contenuti') : f === 'video' ? 'Video' : f === 'article' ? 'Notizie' : f.slice(4);
+  const shown = items.slice(0, n);
+  return `<h2 id="feed-top">${esc(title)} <small>${items.length} contenuti</small></h2>
     <div class="split"><aside class="side ${state.removing === cat.id ? 'removing' : ''} ${state.editing === cat.id ? 'editing' : ''}">${side}</aside>
-    <div class="feed"><div class="list">${items.slice(0, n).map(itemHTML).join('') || '<div class="empty">Ancora nessun contenuto da questa fonte</div>'}</div>
+    <div class="feed"><div class="list">${shown.length ? featureHTML(shown[0]) + shown.slice(1).map(itemHTML).join('') : '<div class="empty">Ancora nessun contenuto da questa fonte</div>'}</div>
     ${items.length > n ? `<button class="more" data-more="${esc(cat.id + f)}">Mostra altri</button>` : ''}</div></div>`;
 }
 
@@ -147,24 +227,13 @@ function outcome(m, team) {
 
 function footballHTML(f) {
   let h = '';
-  const next = f.fixtures[0];
-  if (next) {
-    h += `<h2>Prossima partita</h2><div class="card match">
-      <div class="comp"><span>${esc(next.competition)}</span><span>${esc(next.venue)}</span></div>
-      <div class="teams">
-        <div class="team"><img src="${esc(next.home.logo)}" alt="">${esc(next.home.name)}</div>
-        <div class="score vs">${next.status === 'in' ? `${esc(next.home.score)} – ${esc(next.away.score)}` : 'vs'}</div>
-        <div class="team"><img src="${esc(next.away.logo)}" alt="">${esc(next.away.name)}</div>
-      </div>
-      <div class="countdown">${esc(fmtMatch(next.date))} · ${esc(countdown(next.date))}</div></div>`;
-  }
   const hls = f.results.filter((r) => r.highlight);
   if (hls.length) {
-    h += `<h2>Sintesi delle partite</h2><div class="hscroll">${hls
+    h += `<h2>Sintesi delle partite <small>video highlights</small></h2><div class="hscroll">${hls
       .map((r) => `<a class="card" href="${esc(r.highlight.url)}" target="_blank" rel="noopener">
         <div class="hl" style="margin:0"><img loading="lazy" src="${esc(r.highlight.image)}" alt=""><div class="play"><span>▶</span></div>
         <div class="cap">${esc(r.home.name)} ${esc(r.home.score)}–${esc(r.away.score)} ${esc(r.away.name)}${r.highlight.length ? ' · ' + esc(r.highlight.length) : ''}</div></div>
-        <div class="notice" style="padding:8px 10px">${esc(r.highlight.channel)} · ${esc(r.competition)} · ${esc(fmtShort(r.date))}</div></a>`)
+        <div class="hl-meta"><b>${esc(r.highlight.channel)}</b> · ${esc(r.competition)} · ${esc(fmtShort(r.date))}</div></a>`)
       .join('')}</div>`;
   }
   if (f.results.length) {
@@ -203,10 +272,12 @@ function renderSources(v) {
   const r = repoInfo();
   const errs = state.data?.errors || [];
   v.innerHTML = `
+    <section class="hero p-dots"><div class="eyebrow">⚙️ ${s ? s.categories.length : 0} sezioni · ${s ? s.categories.reduce((a, c) => a + (c.sources || []).length, 0) : 0} fonti</div><h1>Fonti e impostazioni</h1>
+      <div class="sub">Aggiungi canali, crea sezioni, collega GitHub.</div></section>
     <h2>Le mie fonti</h2>
     ${!token ? `<div class="card notice warn" style="margin-bottom:12px">Per aggiungere o togliere fonti dal telefono collega GitHub una volta sola: <b>Impostazioni → Collega GitHub</b> qui sotto.</div>` : ''}
     ${s ? s.categories.map((c, ci) => `
-      <div class="card src-cat"><header><span>${esc(c.icon || '⭐')}</span><span class="grow">${esc(c.name)}</span>
+      <div class="card src-cat"><header><span class="dotc" style="background:${themeOf(c.id).c}"></span><span>${esc(c.icon || '⭐')}</span><span class="grow">${esc(c.name)}</span>
         <button class="x" title="Rinomina categoria" data-rencat="${ci}">✎</button>
         <button class="btn sm" data-add="${ci}">+ Fonte</button>
         ${c.football ? '' : `<button class="x" title="Elimina categoria" data-delcat="${ci}">🗑</button>`}</header>
@@ -223,6 +294,10 @@ function renderSources(v) {
       <a class="btn ghost" href="https://github.com/${esc(r.owner)}/${esc(r.name)}/actions" target="_blank" rel="noopener">Vedi su GitHub</a></div>
 
     <h2>Impostazioni</h2>
+    <div class="card notice" style="margin-bottom:10px">
+      <label for="set-name" style="margin-top:0">Il tuo nome, per il saluto (resta solo su questo dispositivo)</label>
+      <input id="set-name" value="${esc(store.get('name', ''))}" placeholder="es. Marco" autocomplete="given-name">
+    </div>
     <div class="card notice">
       ${token ? `GitHub collegato ✅ (repository <b>${esc(r.owner)}/${esc(r.name)}</b>)` : 'GitHub non collegato.'}
       <div class="row" style="margin-top:10px"><button class="btn ${token ? 'ghost' : ''}" data-token="1">${token ? 'Cambia token' : 'Collega GitHub'}</button>
@@ -460,6 +535,9 @@ document.addEventListener('click', async (e) => {
   }
 });
 $('#refresh').onclick = () => load(true);
+document.addEventListener('input', (e) => { if (e.target.id === 'set-name') { store.set('name', e.target.value.trim()); greeting(); } });
+document.addEventListener('visibilitychange', () => { if (document.hidden) markVisit(); });
+window.addEventListener('pagehide', markVisit);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - state.lastLoad > 5 * 60e3) load(); });
 
 if ('serviceWorker' in navigator) {
