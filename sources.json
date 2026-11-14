@@ -1,0 +1,126 @@
+{
+  "categories": [
+    {
+      "id": "milan",
+      "name": "AC Milan",
+      "icon": "⚽",
+      "sources": [
+        {
+          "name": "Google News · AC Milan",
+          "type": "news",
+          "query": "\"AC Milan\" OR \"Milan calcio\""
+        },
+        {
+          "name": "MilanNews.it",
+          "type": "rss",
+          "url": "https://www.milannews.it/rss/"
+        },
+        {
+          "name": "AC Milan (YouTube)",
+          "type": "youtube",
+          "handle": "@acmilan",
+          "channelId": "UCKcx1uK38H4AOkmfv4ywlrg"
+        },
+        {
+          "name": "Carlo Pellegatti",
+          "type": "youtube",
+          "handle": "@CarloPellegattiofficial",
+          "channelId": "UCJv1AqHPPV0IXM5gB-L6-KA"
+        },
+        {
+          "name": "Antonio Vitiello",
+          "type": "youtube",
+          "handle": "@AntoVitiello",
+          "channelId": "UCPc6ythBGr2D8on7QHiwyPg"
+        },
+        {
+          "name": "Fabrizio Romano",
+          "type": "youtube",
+          "handle": "@FabrizioRomanoItaliano",
+          "channelId": "UC7pT9g1-oKwVgbpipZODvBA"
+        },
+        {
+          "name": "Francesco Letizia",
+          "type": "youtube",
+          "handle": "@fraletizia",
+          "channelId": "UCuVW2rr6rWb7jnM0CRkD49Q"
+        },
+        {
+          "name": "Gianluca Di Marzio (YouTube)",
+          "type": "youtube",
+          "handle": "@GianlucaDiMarzioTV",
+          "channelId": "UCGzb4RuCBrWs-9o1H5uXfxg"
+        },
+        {
+          "name": "GianlucaDiMarzio.com",
+          "type": "rss",
+          "url": "https://www.gianlucadimarzio.com/rss",
+          "filter": "milan"
+        }
+      ],
+      "football": {
+        "teamName": "AC Milan",
+        "espnTeamId": 103,
+        "league": "ita.1",
+        "leagues": [
+          "ita.1",
+          "uefa.champions",
+          "uefa.europa",
+          "ita.coppa_italia"
+        ],
+        "highlightsCount": 6,
+        "highlightChannels": [
+          "AC Milan",
+          "Serie A",
+          "DAZN Italia",
+          "Sky Sport",
+          "UEFA",
+          "Sport Mediaset",
+          "Lega Serie A"
+        ]
+      }
+    },
+    {
+      "id": "ai",
+      "name": "Intelligenza Artificiale",
+      "icon": "🤖",
+      "sources": [
+        {
+          "name": "Antonio Guadagno",
+          "type": "youtube",
+          "handle": "@AntonioGuadagnoAI",
+          "channelId": "UCAFhdtRnKRqJQI7ht1Puo9Q"
+        },
+        {
+          "name": "Bernardo Mascellani",
+          "type": "youtube",
+          "handle": "@BernardoMascellani",
+          "channelId": "UC4PokLZw0220_l2zdm4ydiw"
+        },
+        {
+          "name": "Riccardo Belli Contarini",
+          "type": "youtube",
+          "handle": "@riccardobellicontarini",
+          "channelId": "UC1e1Xt2nsUy9lqP_R7ES5yA"
+        },
+        {
+          "name": "Andrea Ciraolo",
+          "type": "youtube",
+          "handle": "@ciraolone",
+          "channelId": "UCANtyg_73WZaOaQ5sCHOoLg"
+        },
+        {
+          "name": "Michele Cotti",
+          "type": "youtube",
+          "handle": "@michelecottiai",
+          "channelId": "UCdCpMFAeBo7nf-tmiVvQrJg"
+        },
+        {
+          "name": "Google News · IA",
+          "type": "news",
+          "query": "intelligenza artificiale"
+        }
+      ]
+    }
+  ]
+}

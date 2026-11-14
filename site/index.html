@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MyTaste</title>
+<meta name="theme-color" content="#111114">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MyTaste">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="dot"></span>MyTaste</div>
+  <div class="updated" id="updated">…</div>
+  <button class="icon-btn" id="refresh" title="Ricarica" aria-label="Ricarica">⟳</button>
+</header>
+<main id="view" aria-live="polite"><div class="empty">Caricamento…</div></main>
+<nav class="tabs" id="tabs"></nav>
+<div class="sheet hidden" id="sheet"><div class="sheet-card" id="sheet-card"></div></div>
+<script src="app.js"></script>
+</body>
+</html>
