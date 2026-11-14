@@ -121,6 +121,19 @@
           "query": "intelligenza artificiale"
         }
       ]
+    },
+    {
+      "id": "divertimento",
+      "name": "Divertimento",
+      "icon": "😂",
+      "sources": [
+        {
+          "name": "Mandrake",
+          "type": "youtube",
+          "handle": "@mandrake1984",
+          "channelId": "UCnQXGBzP0TBK07h8rr7rfnQ"
+        }
+      ]
     }
   ]
 }
