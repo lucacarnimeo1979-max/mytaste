@@ -1,4 +1,4 @@
-// Scarica tutte le fonti elencate in sources.json e genera site/data/feed.json.
+// Scarica tutte le fonti (da Supabase, riserva sources.json) e genera site/data/feed.json.
 // Gira su GitHub Actions (nessun PC necessario). Nessuna dipendenza esterna: Node 20+.
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 
@@ -8,7 +8,20 @@ const MAX_PER_SOURCE = 15;
 const MAX_PER_CATEGORY = 150;
 const UA = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36';
 
-const config = JSON.parse(await readFile(new URL('sources.json', ROOT), 'utf8'));
+// Le fonti stanno su Supabase (modificabili dall'app); sources.json resta come riserva.
+const SB_URL = 'https://ngbibctqhcsinjcnsjxw.supabase.co';
+const SB_KEY = 'sb_publishable_MOXuqItRDGEboFnyKY9T6A_sT916c90';
+let config;
+try {
+  const r = await fetch(`${SB_URL}/rest/v1/mytaste_config?select=config&id=eq.1`, { headers: { apikey: SB_KEY } });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  config = (await r.json())[0]?.config;
+  if (!config?.categories) throw new Error('nessuna configurazione');
+  console.log('Fonti lette da Supabase');
+} catch (e) {
+  console.warn('Supabase non disponibile (' + e.message + '): uso sources.json');
+  config = JSON.parse(await readFile(new URL('sources.json', ROOT), 'utf8'));
+}
 
 async function get(url, { json = false, headers = {} } = {}) {
   const ctrl = new AbortController();

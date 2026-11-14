@@ -18,7 +18,27 @@ function repoInfo() {
   if (m && repo) return { owner: m[1], name: repo };
   return { owner: 'lucacarnimeo1979-max', name: 'mytaste' };
 }
-const WORKFLOW = 'update.yml';
+// Archivio delle fonti su Supabase: l'app salva da sola, senza passaggi su GitHub.
+// Chiave pubblica "anon": serve solo a chiamare la funzione e a leggere le fonti.
+const SB_URL = 'https://ngbibctqhcsinjcnsjxw.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5nYmliY3RxaGNzaW5qY25zanh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2MTA0ODUsImV4cCI6MjEwNzE4NjQ4NX0.N7SvHvhdW8UKhimPprXXmmCf4IsWxLQmct5numWxll8';
+async function api(action, payload = {}) {
+  const r = await fetch(`${SB_URL}/functions/v1/mytaste`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SB_KEY, apikey: SB_KEY },
+    body: JSON.stringify({ action, ...payload }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.error) throw new Error(j.error || 'Servizio non raggiungibile');
+  return j;
+}
+async function fetchConfig() {
+  const r = await fetch(`${SB_URL}/rest/v1/mytaste_config?select=config&id=eq.1`, { headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY }, cache: 'no-store' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const rows = await r.json();
+  if (!rows[0]?.config) throw new Error('vuoto');
+  return rows[0].config;
+}
 
 const state = { data: null, sources: null, tab: store.get('tab', null), filter: {}, shown: {}, lastLoad: 0 };
 
@@ -93,7 +113,7 @@ async function load(force = false) {
   try {
     const [d, s] = await Promise.all([
       fetch('data/feed.json?t=' + Date.now(), { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); }),
-      fetch('sources.json?t=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetchConfig().catch(() => fetch('sources.json?t=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null)),
     ]);
     state.data = d;
     if (s) state.sources = s;
@@ -139,7 +159,7 @@ function heroHTML(cat) {
   const last = cat.items[0]?.date;
   const srcs = (cat.sources || []).filter((s) => s.avatar);
   const stack = srcs.length ? `<span class="stack">${srcs.slice(0, 5).map((s) => `<img src="${esc(s.avatar)}" alt="" loading="lazy" onerror="this.remove()">`).join('')}</span>` : '';
-  const sub = `<div class="sub">${stack}<span>${fresh ? `<b>${fresh} nuovi</b> dall'ultima visita` : 'Sei in pari'}</span>${last ? `<span>ultimo ${esc(ago(last))}</span>` : ''}</div>`;
+  const sub = `<div class="sub">${stack}<span>${fresh ? `<b>${fresh} ${fresh === 1 ? 'nuovo' : 'nuovi'}</b> dall'ultima visita` : 'Sei in pari'}</span>${last ? `<span>ultimo ${esc(ago(last))}</span>` : ''}</div>`;
   const f = cat.football;
   const next = f?.fixtures?.[0];
   if (next) {
@@ -268,14 +288,12 @@ function srcDetail(s) { return s.type === 'youtube' ? s.handle || s.channelId ||
 
 function renderSources(v) {
   const s = state.sources;
-  const token = store.get('token');
   const r = repoInfo();
   const errs = state.data?.errors || [];
   v.innerHTML = `
     <section class="hero p-dots"><div class="eyebrow">⚙️ ${s ? s.categories.length : 0} sezioni · ${s ? s.categories.reduce((a, c) => a + (c.sources || []).length, 0) : 0} fonti</div><h1>Fonti e impostazioni</h1>
-      <div class="sub">Aggiungi canali, crea sezioni, collega GitHub.</div></section>
+      <div class="sub">Cerca un canale per nome e aggiungilo con un tocco.</div></section>
     <h2>Le mie fonti</h2>
-    ${!token ? `<div class="card notice warn" style="margin-bottom:12px">Per aggiungere o togliere fonti dal telefono collega GitHub una volta sola: <b>Impostazioni → Collega GitHub</b> qui sotto.</div>` : ''}
     ${s ? s.categories.map((c, ci) => `
       <div class="card src-cat"><header><span class="dotc" style="background:${themeOf(c.id).c}"></span><span>${esc(c.icon || '⭐')}</span><span class="grow">${esc(c.name)}</span>
         <button class="x" title="Rinomina categoria" data-rencat="${ci}">✎</button>
@@ -287,46 +305,61 @@ function renderSources(v) {
     <div class="row"><button class="btn ghost" data-newcat="1">+ Nuova categoria (es. Tecnologia, Viaggi…)</button></div>
 
     <h2>Aggiornamenti</h2>
-    <div class="card notice">I contenuti si scaricano <b>da soli ogni ora</b> sui server di GitHub, anche a telefono e PC spenti.
+    <div class="card notice">I contenuti si scaricano <b>da soli ogni ora</b>, anche a telefono e PC spenti. Quando aggiungi un canale, i suoi ultimi video compaiono subito.
       Ultimo aggiornamento: <b>${state.data ? esc(new Date(state.data.updated).toLocaleString('it-IT')) : '—'}</b>.
       ${errs.length ? `<br><br>Fonti con problemi all'ultimo giro:<br>${errs.map(esc).join('<br>')}` : ''}</div>
-    <div class="row" style="margin-top:10px"><button class="btn" data-dispatch="1" ${token ? '' : 'disabled'}>Aggiorna adesso</button>
-      <a class="btn ghost" href="https://github.com/${esc(r.owner)}/${esc(r.name)}/actions" target="_blank" rel="noopener">Vedi su GitHub</a></div>
+    <div class="row" style="margin-top:10px"><a class="btn ghost" href="https://github.com/${esc(r.owner)}/${esc(r.name)}/actions" target="_blank" rel="noopener">Vedi gli aggiornamenti su GitHub</a></div>
 
     <h2>Impostazioni</h2>
     <div class="card notice" style="margin-bottom:10px">
       <label for="set-name" style="margin-top:0">Il tuo nome, per il saluto (resta solo su questo dispositivo)</label>
       <input id="set-name" value="${esc(store.get('name', ''))}" placeholder="es. Marco" autocomplete="given-name">
     </div>
-    <div class="card notice">
-      ${token ? `GitHub collegato ✅ (repository <b>${esc(r.owner)}/${esc(r.name)}</b>)` : 'GitHub non collegato.'}
-      <div class="row" style="margin-top:10px"><button class="btn ${token ? 'ghost' : ''}" data-token="1">${token ? 'Cambia token' : 'Collega GitHub'}</button>
-      ${token ? '<button class="btn ghost" data-logout="1">Scollega</button>' : ''}</div>
-    </div>`;
+`;
 }
 
 function openSheet(html) { $('#sheet-card').innerHTML = html; $('#sheet').classList.remove('hidden'); }
 function closeSheet() { $('#sheet').classList.add('hidden'); }
 
+// Aggiungi una fonte: scrivi un nome (cerca su YouTube), un link a un canale o l'indirizzo di un sito
 function addSourceForm(ci) {
   const c = state.sources.categories[ci];
   openSheet(`<h3>Aggiungi a ${esc(c.name)}</h3>
-    <label>Tipo di fonte</label>
-    <select id="f-type"><option value="youtube">Canale YouTube</option><option value="rss">Sito web / feed RSS</option><option value="news">Ricerca notizie (Google News)</option></select>
-    <label id="f-vl">Nome del canale, @handle o link</label><input id="f-val" placeholder="es. @nomecanale oppure https://youtube.com/@..." autocapitalize="off">
-    <label>Nome da mostrare (facoltativo)</label><input id="f-name" placeholder="es. Mario Rossi">
-    <div class="row" style="margin-top:16px"><button class="btn" id="f-ok">Salva</button><button class="btn ghost" data-close="1">Annulla</button></div>`);
-  const ph = { youtube: ['Nome del canale, @handle o link', 'es. @nomecanale oppure https://youtube.com/@...'], rss: ['Indirizzo del sito o del feed RSS', 'https://...'], news: ['Parole chiave', 'es. Rafael Leão'] };
-  $('#f-type').onchange = (e) => { const [l, p] = ph[e.target.value]; $('#f-vl').textContent = l; $('#f-val').placeholder = p; };
-  $('#f-ok').onclick = async () => {
-    const type = $('#f-type').value;
-    const val = $('#f-val').value.trim();
-    if (!val) return toast('Scrivi la fonte');
-    const src = { name: $('#f-name').value.trim() || val.replace(/^https?:\/\/(www\.)?/, '').replace(/^@/, ''), type };
-    if (type === 'youtube') src.handle = /^https?:|^@|^UC[\w-]{20,}$/.test(val) ? val : '@' + val.replace(/\s+/g, '');
-    else if (type === 'news') src.query = val;
-    else src.url = /^https?:/.test(val) ? val : 'https://' + val;
-    await saveSources((cfg) => { cfg.categories[ci].sources.push(src); }, `Aggiunta fonte "${src.name}"`);
+    <div class="notice" style="padding:2px 0 6px">Scrivi il nome di un canale YouTube, oppure incolla un link o l'indirizzo di un sito.</div>
+    <form id="f-form" class="search"><input id="f-q" type="search" placeholder="es. Mandrake, @canale, ilpost.it" autocapitalize="off" autocomplete="off" enterkeyhint="search">
+    <button class="btn" type="submit">Cerca</button></form>
+    <div id="f-res" class="results"></div>`);
+  const q = $('#f-q');
+  setTimeout(() => q.focus(), 50);
+  let found = [];
+  const draw = (html) => { $('#f-res').innerHTML = html; };
+  $('#f-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const text = q.value.trim();
+    if (!text) return;
+    draw('<div class="notice">Cerco…</div>');
+    try {
+      const r = await api('find', { q: text });
+      found = r.results || [];
+      const looksLikeLink = /^https?:|\.\w{2,}(\/|$)|^@/.test(text);
+      if (!looksLikeLink) found.push({ type: 'news', name: 'Notizie su ' + text, query: text, subs: 'Ricerca su Google News' });
+      draw(found.length ? found.map((x, k) => `<button class="res" data-pick="${k}">
+          ${x.avatar ? `<img src="${esc(x.avatar)}" alt="" loading="lazy">` : `<span class="av">${x.type === 'news' ? '📰' : x.type === 'rss' ? '🌐' : '▶'}</span>`}
+          <span class="grow"><b>${esc(x.name || x.handle || 'Canale')}</b><small>${esc(x.type === 'youtube' ? [x.handle, x.subs].filter(Boolean).join(' · ') || 'Canale YouTube' : x.type === 'rss' ? x.url : x.subs)}</small></span>
+          <span class="addp">+</span></button>`).join('') : `<div class="notice">Nessun risultato${r.warning ? ' (' + esc(r.warning) + ')' : ''}. Prova con @nome del canale o con il link.</div>`);
+    } catch (err) { draw(`<div class="notice warn">${esc(err.message)}</div>`); }
+  };
+  $('#f-res').onclick = async (e) => {
+    const b = e.target.closest('[data-pick]');
+    if (!b) return;
+    const x = found[+b.dataset.pick];
+    const src = { name: (x.name || x.handle || 'Canale').trim(), type: x.type };
+    if (x.type === 'youtube') { src.channelId = x.channelId; if (x.handle) src.handle = x.handle; }
+    else if (x.type === 'rss') src.url = x.url;
+    else src.query = x.query;
+    if (c.sources.some((y) => y.name === src.name || (src.channelId && y.channelId === src.channelId))) return toast('È già tra le tue fonti');
+    b.disabled = true; b.querySelector('.addp').textContent = '…';
+    await saveSources((cfg) => { cfg.categories.find((k) => k.id === c.id).sources.push(src); }, `Aggiunta fonte "${src.name}"`, { catId: c.id, src, avatar: x.avatar || '' });
   };
 }
 
@@ -376,82 +409,38 @@ function newCategoryForm() {
   };
 }
 
-function tokenForm() {
-  const r = repoInfo();
-  const url = `https://github.com/settings/personal-access-tokens/new`;
-  openSheet(`<h3>Collega GitHub</h3>
-    <div class="notice" style="padding:6px 0">Serve un “token” personale, si crea una volta sola dal telefono:<br>
-    1. Apri <a style="color:var(--accent)" href="${url}" target="_blank" rel="noopener"><b>questa pagina di GitHub</b></a><br>
-    2. Nome: <b>MyTaste</b> · Scadenza: quella che preferisci<br>
-    3. <b>Repository access</b> → <i>Only select repositories</i> → <b>${esc(r.name)}</b><br>
-    4. <b>Permissions</b> → <b>Contents</b>: Read and write · <b>Actions</b>: Read and write<br>
-    5. <b>Generate token</b>, copialo e incollalo qui sotto.<br>
-    Il token resta salvato solo su questo telefono.</div>
-    <label>Token</label><input id="t-val" placeholder="github_pat_..." autocapitalize="off" autocomplete="off">
-    <label>Repository</label><input id="t-repo" value="${esc(r.owner + '/' + r.name)}" autocapitalize="off">
-    <div class="row" style="margin-top:16px"><button class="btn" id="t-ok">Salva</button><button class="btn ghost" data-close="1">Annulla</button></div>`);
-  $('#t-ok').onclick = async () => {
-    const t = $('#t-val').value.trim();
-    const [owner, name] = $('#t-repo').value.trim().split('/');
-    if (!t || !owner || !name) return toast('Compila token e repository');
-    try {
-      const res = await gh(`/repos/${owner}/${name}`, {}, t);
-      store.set('token', t);
-      store.set('repo', { owner, name, branch: res.default_branch });
-      closeSheet();
-      toast('GitHub collegato ✅');
-      render();
-    } catch (e) { toast('Token non valido: ' + e.message, 5000); }
-  };
-}
-
-async function gh(path, opts = {}, token = store.get('token')) {
-  const res = await fetch('https://api.github.com' + path, {
-    ...opts,
-    headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + token, 'X-GitHub-Api-Version': '2022-11-28', ...(opts.headers || {}) },
-  });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || 'HTTP ' + res.status);
-  return res.status === 204 ? null : res.json();
-}
-const b64 = (str) => btoa(String.fromCharCode(...new TextEncoder().encode(str)));
-const unb64 = (b) => new TextDecoder().decode(Uint8Array.from(atob(b.replace(/\n/g, '')), (c) => c.charCodeAt(0)));
-
-async function branch() {
-  const r = repoInfo();
-  if (r.branch) return r.branch;
-  const info = await gh(`/repos/${r.owner}/${r.name}`);
-  store.set('repo', { ...r, branch: info.default_branch });
-  return info.default_branch;
-}
-
-async function saveSources(mutate, message) {
-  if (!store.get('token')) { closeSheet(); return tokenForm(); }
-  const r = repoInfo();
+async function saveSources(mutate, message, added = null) {
   try {
-    const br = await branch();
-    const file = await gh(`/repos/${r.owner}/${r.name}/contents/sources.json?ref=${encodeURIComponent(br)}`);
-    const cfg = JSON.parse(unb64(file.content));
+    let cfg;
+    try { cfg = await fetchConfig(); } catch { cfg = JSON.parse(JSON.stringify(state.sources)); }
     mutate(cfg);
-    await gh(`/repos/${r.owner}/${r.name}/contents/sources.json`, {
-      method: 'PUT',
-      body: JSON.stringify({ message: message + ' (da MyTaste)', content: b64(JSON.stringify(cfg, null, 2) + '\n'), sha: file.sha, branch: br }),
-    });
+    await api('save', { config: cfg, note: message });
     state.sources = cfg;
     syncData(cfg);
     closeSheet();
+    if (added) {
+      state.filter[added.catId] = 'src:' + added.src.name;
+      state.tab = added.catId; store.set('tab', added.catId);
+      const d = state.data?.categories.find((k) => k.id === added.catId);
+      const s = d?.sources.find((k) => k.name === added.src.name);
+      if (s && added.avatar) s.avatar = added.avatar;
+      keepSide(render);
+      toast('Aggiunto ✅ Carico i contenuti…');
+      try {
+        const { items } = await api('preview', { source: added.src });
+        if (d) {
+          d.items = [...items, ...d.items].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+          if (s) s.count = items.length;
+          store.set('cache', state.data);
+        }
+      } catch { toast('Aggiunto. I contenuti arriveranno al prossimo aggiornamento', 4500); }
+    } else {
+      toast('Salvato ✅');
+    }
     keepSide(render);
-    toast('Salvato ✅ I nuovi contenuti arrivano tra 2-3 minuti', 5000);
   } catch (e) {
     toast('Errore: ' + e.message, 6000);
   }
-}
-
-async function dispatch() {
-  const r = repoInfo();
-  try {
-    await gh(`/repos/${r.owner}/${r.name}/actions/workflows/${WORKFLOW}/dispatches`, { method: 'POST', body: JSON.stringify({ ref: await branch() }) });
-    toast('Aggiornamento avviato: pronto tra 2-3 minuti', 5000);
-  } catch (e) { toast('Errore: ' + e.message, 6000); }
 }
 
 function catIndex(id) { return state.sources ? state.sources.categories.findIndex((c) => c.id === id) : -1; }
@@ -520,9 +509,6 @@ document.addEventListener('click', async (e) => {
   if (ds.std) { state.shown._std = !state.shown._std; render(); return; }
   if (ds.add) return addSourceForm(+ds.add);
   if (ds.newcat) return newCategoryForm();
-  if (ds.token) return tokenForm();
-  if (ds.logout) { store.del('token'); store.del('repo'); render(); return; }
-  if (ds.dispatch) return dispatch();
   if (ds.del) {
     const [ci, si] = ds.del.split(':').map(Number);
     const s = state.sources.categories[ci].sources[si];
