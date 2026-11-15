@@ -117,6 +117,38 @@ async function siteToFeed(input: string) {
   return { type: "rss", url: feed, name: title || new URL(r.url).hostname };
 }
 
+// ---------- riserva: pagina "Video" del canale ----------
+function relDate(t = "") {
+  const m = t.toLowerCase().match(/(\d+)\s*(second|minut|or[ae]\b|hour|giorn|day|settiman|week|mes[ei]|month|ann[oi]|year)/);
+  if (!m) return null;
+  const units: Record<string, number> = { second: 1, minut: 60, ora: 3600, ore: 3600, hour: 3600, giorn: 86400, day: 86400, settiman: 604800, week: 604800, mese: 2592000, mesi: 2592000, month: 2592000, anno: 31536000, anni: 31536000, year: 31536000 };
+  return new Date(Date.now() - +m[1] * (units[m[2]] || 86400) * 1000).toISOString();
+}
+async function channelVideosPage(channelId: string) {
+  const { text } = await get(`https://www.youtube.com/channel/${channelId}/videos`, YT_HEADERS);
+  const m = text.match(/var ytInitialData = (\{.*?\});<\/script>/s);
+  if (!m) throw new Error("pagina canale non leggibile");
+  const out: any[] = [];
+  const walk2 = (o: any) => {
+    if (Array.isArray(o)) return o.forEach(walk2);
+    if (!o || typeof o !== "object") return;
+    const l = o.lockupViewModel;
+    if (l?.contentId) {
+      const meta = l.metadata?.lockupMetadataViewModel;
+      const parts = (meta?.metadata?.contentMetadataViewModel?.metadataRows || []).flatMap((r: any) => r.metadataParts || []);
+      const when = parts.map((p: any) => p.accessibilityLabel || p.text?.content || "").find((t: string) => / fa$|ago$/i.test(t)) || "";
+      out.push({ title: meta?.title?.content || "", link: `https://www.youtube.com/watch?v=${l.contentId}`, date: relDate(when), image: `https://i.ytimg.com/vi/${l.contentId}/hqdefault.jpg` });
+    } else if (o.videoRenderer?.videoId) {
+      const v = o.videoRenderer;
+      out.push({ title: v.title?.runs?.[0]?.text || "", link: `https://www.youtube.com/watch?v=${v.videoId}`, date: relDate(v.publishedTimeText?.simpleText), image: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg` });
+    }
+    Object.values(o).forEach(walk2);
+  };
+  walk2(JSON.parse(m[1]));
+  const seen = new Set();
+  return out.filter((i) => i.title && !seen.has(i.link) && seen.add(i.link));
+}
+
 // ---------- anteprima: ultimi contenuti di una fonte ----------
 async function preview(src: any) {
   let url = src.url, kind = "article";
@@ -127,7 +159,11 @@ async function preview(src: any) {
   } else if (src.type === "news") {
     url = `https://news.google.com/rss/search?q=${encodeURIComponent(src.query)}&hl=it&gl=IT&ceid=IT:it`;
   }
-  const items = parseFeed((await get(url)).text).slice(0, 15);
+  let items: any[] = [];
+  try { items = parseFeed((await get(url)).text); } catch { items = []; }
+  // Il feed RSS di YouTube a volte risponde 404: in quel caso leggo la pagina pubblica "Video" del canale
+  if (!items.length && kind === "video") items = await channelVideosPage(url.split("channel_id=")[1]);
+  items = items.slice(0, 15);
   return items.map((i) => {
     let title = i.title, source = src.name;
     if (src.type === "news") { const k = title.lastIndexOf(" - "); if (k > 0) { source = title.slice(k + 3); title = title.slice(0, k); } }

@@ -113,6 +113,37 @@ function sourceIcon(src) {
   } catch { return ''; }
 }
 
+// "2 settimane fa" / "3 days ago" -> data approssimativa
+function relDate(t = '') {
+  const m = t.toLowerCase().match(/(\d+)\s*(second|minut|or[ae]\b|hour|giorn|day|settiman|week|mes[ei]|month|ann[oi]|year)/);
+  if (!m) return null;
+  const unit = { second: 1, minut: 60, ora: 3600, ore: 3600, hour: 3600, giorn: 86400, day: 86400, settiman: 604800, week: 604800, mese: 2592000, mesi: 2592000, month: 2592000, anno: 31536000, anni: 31536000, year: 31536000 }[m[2]] || 86400;
+  return new Date(Date.now() - +m[1] * unit * 1000).toISOString();
+}
+async function channelVideosPage(channelId) {
+  const html = await get(`https://www.youtube.com/channel/${channelId}/videos`, { headers: { Cookie: 'SOCS=CAI; CONSENT=YES+1', 'Accept-Language': 'it-IT,it;q=0.9', 'User-Agent': 'Mozilla/5.0' } });
+  const m = html.match(/var ytInitialData = (\{.*?\});<\/script>/s);
+  if (!m) throw new Error('pagina canale non leggibile');
+  const out = [];
+  (function walk(o) {
+    if (Array.isArray(o)) return o.forEach(walk);
+    if (!o || typeof o !== 'object') return;
+    const l = o.lockupViewModel;
+    if (l?.contentId && l.contentType === 'LOCKUP_CONTENT_TYPE_VIDEO' || (l?.contentId && !l.contentType)) {
+      const meta = l.metadata?.lockupMetadataViewModel;
+      const parts = (meta?.metadata?.contentMetadataViewModel?.metadataRows || []).flatMap((r) => r.metadataParts || []);
+      const when = parts.map((p) => p.accessibilityLabel || p.text?.content || '').find((t) => / fa$|ago$/i.test(t)) || '';
+      out.push({ title: meta?.title?.content || '', link: `https://www.youtube.com/watch?v=${l.contentId}`, date: relDate(when), image: `https://i.ytimg.com/vi/${l.contentId}/hqdefault.jpg`, summary: '' });
+    } else if (o.videoRenderer?.videoId) {
+      const v = o.videoRenderer;
+      out.push({ title: v.title?.runs?.[0]?.text || '', link: `https://www.youtube.com/watch?v=${v.videoId}`, date: relDate(v.publishedTimeText?.simpleText), image: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`, summary: '' });
+    }
+    Object.values(o).forEach(walk);
+  })(JSON.parse(m[1]));
+  const seen = new Set();
+  return out.filter((i) => i.title && !seen.has(i.link) && seen.add(i.link));
+}
+
 async function loadSource(src) {
   let url, kind = 'article';
   if (src.type === 'youtube') {
@@ -123,7 +154,14 @@ async function loadSource(src) {
   } else {
     url = src.url;
   }
-  let items = parseFeed(await get(url));
+  let items;
+  if (kind === 'video') {
+    // Il feed RSS di YouTube a volte risponde 404 per ore: in quel caso leggo la pagina pubblica "Video" del canale
+    try { items = parseFeed(await get(url)); } catch (e) { items = []; }
+    if (!items.length) items = await channelVideosPage(url.split('channel_id=')[1]);
+  } else {
+    items = parseFeed(await get(url));
+  }
   if (src.filter) {
     // filtro facoltativo: tiene solo gli elementi che contengono una delle parole (separate da virgola)
     const words = src.filter.toLowerCase().split(',').map((w) => w.trim()).filter(Boolean);
